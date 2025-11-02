@@ -1,3 +1,5 @@
+@file:Suppress("NonAsciiCharacters")
+
 package com.example.kame
 
 import android.os.Bundle
