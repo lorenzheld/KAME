@@ -24,11 +24,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import com.example.kame.ui.theme.KAMETheme
-import com.example.kame.screens.DiagrammeScreen
 import com.example.kame.screens.HomeScreen
-import com.example.kame.screens.ProfilScreen
-import com.example.kame.screens.PläneScreen
 import com.example.kame.screens.WorkoutsScreen
+import com.example.kame.screens.DiagrammeScreen
+import com.example.kame.screens.PläneScreen
+import com.example.kame.screens.ProfilScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
