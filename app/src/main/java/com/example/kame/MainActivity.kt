@@ -22,9 +22,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import com.example.kame.ui.theme.KAMETheme
+import com.example.kame.screens.DiagrammeScreen
+import com.example.kame.screens.HomeScreen
+import com.example.kame.screens.ProfilScreen
+import com.example.kame.screens.PläneScreen
+import com.example.kame.screens.WorkoutsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,10 +72,13 @@ fun KAMEApp() {
         }
     ) {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-            Greeting(
-                name = "Android",
-                modifier = Modifier.padding(innerPadding)
-            )
+            when (currentDestination) {
+                AppDestinations.HOME -> HomeScreen(modifier = Modifier.padding(innerPadding))
+                AppDestinations.WORKOUTS -> WorkoutsScreen(modifier = Modifier.padding(innerPadding))
+                AppDestinations.DIAGRAMME -> DiagrammeScreen(modifier = Modifier.padding(innerPadding))
+                AppDestinations.PLÄNE -> PläneScreen(modifier = Modifier.padding(innerPadding))
+                AppDestinations.PROFIL -> ProfilScreen(modifier = Modifier.padding(innerPadding))
+            }
         }
     }
 }
@@ -86,20 +93,4 @@ enum class AppDestinations(
     DIAGRAMME("Diagramme", iconDrawable = R.drawable.ic_bar_chart),
     PLÄNE("Pläne", iconDrawable = R.drawable.ic_plan),
     PROFIL("Profil", iconVector = Icons.Default.AccountBox),
-}
-
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    KAMETheme {
-        Greeting("Android")
-    }
 }
