@@ -25,17 +25,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
+import androidx.lifecycle.lifecycleScope
+import com.example.kame.data.SampleData
+import com.example.kame.data.database.WorkoutDatabase
 import com.example.kame.ui.theme.KAMETheme
 import com.example.kame.screens.HomeScreen
 import com.example.kame.screens.WorkoutsScreen
 import com.example.kame.screens.DiagrammeScreen
-import com.example.kame.screens.PläneScreen
 import com.example.kame.screens.ProfilScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // ✅ Datenbank initialisieren
+        val database = WorkoutDatabase.getDatabase(this)
+        val workoutDao = database.workoutDao()
+
+        // ✅ Sample-Daten einfügen (nur beim ersten Start)
+        SampleData.insertSampleDataIfNeeded(this, workoutDao, lifecycleScope)
+
         setContent {
             KAMETheme {
                 KAMEApp()
@@ -78,7 +88,6 @@ fun KAMEApp() {
                 AppDestinations.HOME -> HomeScreen(modifier = Modifier.padding(innerPadding))
                 AppDestinations.WORKOUTS -> WorkoutsScreen(modifier = Modifier.padding(innerPadding))
                 AppDestinations.DIAGRAMME -> DiagrammeScreen(modifier = Modifier.padding(innerPadding))
-                AppDestinations.PLÄNE -> PläneScreen(modifier = Modifier.padding(innerPadding))
                 AppDestinations.PROFIL -> ProfilScreen(modifier = Modifier.padding(innerPadding))
             }
         }
@@ -93,6 +102,5 @@ enum class AppDestinations(
     HOME("Home", iconVector = Icons.Default.Home),
     WORKOUTS("Workouts", iconDrawable = R.drawable.ic_workout),
     DIAGRAMME("Diagramme", iconDrawable = R.drawable.ic_bar_chart),
-    PLÄNE("Pläne", iconDrawable = R.drawable.ic_plan),
     PROFIL("Profil", iconVector = Icons.Default.AccountBox),
 }

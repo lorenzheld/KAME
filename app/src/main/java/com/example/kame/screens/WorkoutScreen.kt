@@ -12,10 +12,11 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -23,22 +24,19 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.kame.R
+import com.example.kame.data.database.WorkoutDatabase
+import com.example.kame.data.database.WorkoutEntity
 import com.example.kame.ui.theme.KAMETheme
-
-data class WorkoutPlan(
-    val title: String,
-    val muscleGroups: String,
-    val exerciseCount: String
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkoutsScreen(modifier: Modifier = Modifier) {
-    // Sample data
-    val workoutPlans = listOf(
-        WorkoutPlan("Push Day Oberkörper", "Brust, Schulter, Trizeps", "7 Übungen"),
-        WorkoutPlan("Leg Day Intensiv", "Beine, Waden, Gesäß", "6 Übungen")
-    )
+    val context = LocalContext.current
+    val database = remember { WorkoutDatabase.getDatabase(context) }
+    val workoutDao = database.workoutDao()
+
+    // Daten aus der Datenbank abrufen (live updates!)
+    val workouts by workoutDao.getAllWorkouts().collectAsState(initial = emptyList())
 
     Scaffold(
         topBar = {
@@ -99,21 +97,23 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            // Workout Plan Cards
-            items(workoutPlans) { plan ->
-                WorkoutPlanCard(plan)
+            // Workout Plan Cards aus der Datenbank
+            items(workouts) { workout ->
+                WorkoutPlanCard(workout)
             }
 
-            // Empty State Card
-            item {
-                EmptyStateCard()
+            // Empty State nur anzeigen, wenn keine Workouts vorhanden
+            if (workouts.isEmpty()) {
+                item {
+                    EmptyStateCard()
+                }
             }
         }
     }
 }
 
 @Composable
-fun WorkoutPlanCard(plan: WorkoutPlan) {
+fun WorkoutPlanCard(workout: WorkoutEntity) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -132,7 +132,7 @@ fun WorkoutPlanCard(plan: WorkoutPlan) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = plan.title,
+                    text = workout.name,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -148,30 +148,43 @@ fun WorkoutPlanCard(plan: WorkoutPlan) {
 
             // Tags
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
+                // Muscle Groups Tag
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Text(
-                        text = plan.muscleGroups,
+                        text = workout.muscleGroups.joinToString(", "),
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
+
+                // Exercise Count Tag
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Text(
-                        text = plan.exerciseCount,
+                        text = "${workout.exerciseCount} Übungen",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
+            }
+
+            // Last Performed Info (optional)
+            workout.lastPerformed?.let { lastDate ->
+                Text(
+                    text = "Zuletzt: ${formatDate(lastDate)}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
             }
 
             // Action Buttons
@@ -180,7 +193,7 @@ fun WorkoutPlanCard(plan: WorkoutPlan) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { /* TODO */ },
+                    onClick = { /* TODO: Start Workout */ },
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp),
@@ -197,7 +210,7 @@ fun WorkoutPlanCard(plan: WorkoutPlan) {
                 }
 
                 Surface(
-                    onClick = { /* TODO */ },
+                    onClick = { /* TODO: Share Workout */ },
                     modifier = Modifier.size(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer
@@ -259,13 +272,14 @@ fun EmptyStateCard() {
                 text = "Erstelle deinen ersten Plan, um deine Workouts zu verfolgen.",
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Button(
-                onClick = { /* TODO */ },
+                onClick = { /* TODO: Create Workout */ },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
@@ -278,6 +292,17 @@ fun EmptyStateCard() {
                 )
             }
         }
+    }
+}
+
+// Helper function für Datum-Formatierung
+fun formatDate(isoDate: String): String {
+    return try {
+        // Vereinfachte Darstellung: Zeige nur Datum
+        val parts = isoDate.split("T")[0].split("-")
+        "${parts[2]}.${parts[1]}.${parts[0]}"
+    } catch (e: Exception) {
+        "Unbekannt"
     }
 }
 
