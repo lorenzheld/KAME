@@ -41,7 +41,7 @@ data class ExerciseEntity(
             entity = ExerciseEntity::class,
             parentColumns = ["id"],
             childColumns = ["exerciseId"],
-            onDelete = ForeignKey.CASCADE
+            onDelete = ForeignKey.NO_ACTION  // ✅ CHANGED: Keine Cascade Delete
         )
     ],
     indices = [Index("exerciseId")]

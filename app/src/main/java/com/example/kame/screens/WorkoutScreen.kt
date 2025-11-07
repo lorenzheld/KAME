@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -27,6 +28,10 @@ import com.example.kame.R
 import com.example.kame.data.database.WorkoutDatabase
 import com.example.kame.data.database.WorkoutEntity
 import com.example.kame.ui.theme.KAMETheme
+import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,9 +39,27 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val database = remember { WorkoutDatabase.getDatabase(context) }
     val workoutDao = database.workoutDao()
+    val scope = rememberCoroutineScope()
 
     // Daten aus der Datenbank abrufen (live updates!)
     val workouts by workoutDao.getAllWorkouts().collectAsState(initial = emptyList())
+
+    // Navigation State
+    var activeWorkoutId by remember { mutableStateOf<String?>(null) }
+    var resumeWorkout by remember { mutableStateOf(false) }
+
+    // Zeige ActiveWorkoutScreen wenn gestartet
+    if (activeWorkoutId != null) {
+        ActiveWorkoutScreen(
+            workoutId = activeWorkoutId!!,
+            resumeSession = resumeWorkout,
+            onFinish = {
+                activeWorkoutId = null
+                resumeWorkout = false
+            }
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -99,7 +122,31 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
         ) {
             // Workout Plan Cards aus der Datenbank
             items(workouts) { workout ->
-                WorkoutPlanCard(workout)
+                // Prüfe ob es eine aktuelle Session gibt (innerhalb der letzten 6 Stunden)
+                var hasRecentSession by remember { mutableStateOf(false) }
+
+                LaunchedEffect(workout.id) {
+                    val lastSession = workoutDao.getLastSessionForWorkout(workout.id)
+                    if (lastSession != null) {
+                        val sessionTime = LocalDateTime.parse(lastSession.timestamp, DateTimeFormatter.ISO_DATE_TIME)
+                        val now = LocalDateTime.now()
+                        val hoursSince = ChronoUnit.HOURS.between(sessionTime, now)
+                        hasRecentSession = hoursSince < 6  // Innerhalb der letzten 6 Stunden
+                    }
+                }
+
+                WorkoutPlanCard(
+                    workout = workout,
+                    hasRecentSession = hasRecentSession,
+                    onStartWorkout = { workoutId ->
+                        activeWorkoutId = workoutId
+                        resumeWorkout = false
+                    },
+                    onResumeWorkout = { workoutId ->
+                        activeWorkoutId = workoutId
+                        resumeWorkout = true
+                    }
+                )
             }
 
             // Empty State nur anzeigen, wenn keine Workouts vorhanden
@@ -113,7 +160,12 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun WorkoutPlanCard(workout: WorkoutEntity) {
+fun WorkoutPlanCard(
+    workout: WorkoutEntity,
+    hasRecentSession: Boolean,
+    onStartWorkout: (String) -> Unit,
+    onResumeWorkout: (String) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -187,43 +239,112 @@ fun WorkoutPlanCard(workout: WorkoutEntity) {
                 )
             }
 
-            // Action Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = { /* TODO: Start Workout */ },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
+            // Action Buttons - ZWEI BUTTONS wenn aktive Session
+            if (hasRecentSession) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "Starten",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Surface(
-                    onClick = { /* TODO: Share Workout */ },
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
+                    // Resume Button (prominent)
+                    Button(
+                        onClick = { onResumeWorkout(workout.id) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Teilen",
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Letztes Workout fortsetzen",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Start New + Share
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onStartWorkout(workout.id) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                "Neu starten",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Surface(
+                            onClick = { /* TODO: Share Workout */ },
+                            modifier = Modifier.size(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Teilen",
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Original Single Button Layout
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { onStartWorkout(workout.id) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text(
+                            "Starten",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Surface(
+                        onClick = { /* TODO: Share Workout */ },
+                        modifier = Modifier.size(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Teilen",
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
                     }
                 }
             }
