@@ -6,18 +6,14 @@ plugins {
 }
 
 android {
-    namespace = "com.example.kame"
-    compileSdk = 36
-
-    sourceSets {
-        getByName("main") {
-            java.srcDirs("src/main/java")
-        }
+    namespace = "bbw.kame"
+    compileSdk {
+        version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.kame"
-        minSdk = 33
+        applicationId = "bbw.kame"
+        minSdk = 34
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
