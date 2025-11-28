@@ -5,8 +5,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface WorkoutDao {
-    // Workouts
-    @Query("SELECT * FROM workouts ORDER BY lastPerformed DESC")
+    // --- Workouts ---
+    @Query("SELECT * FROM workouts ORDER BY createdAt DESC")
     fun getAllWorkouts(): Flow<List<WorkoutEntity>>
 
     @Query("SELECT * FROM workouts WHERE id = :workoutId")
@@ -15,18 +15,15 @@ interface WorkoutDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWorkout(workout: WorkoutEntity)
 
+    @Update
+    suspend fun updateWorkout(workout: WorkoutEntity)
+
     @Delete
     suspend fun deleteWorkout(workout: WorkoutEntity)
 
-    @Query("DELETE FROM workouts")
-    suspend fun deleteAllWorkouts()
-
-    // Exercises
+    // --- Exercises ---
     @Query("SELECT * FROM exercises WHERE workoutId = :workoutId ORDER BY `order` ASC")
     fun getExercisesForWorkout(workoutId: String): Flow<List<ExerciseEntity>>
-
-    @Query("SELECT * FROM exercises WHERE id = :exerciseId")
-    fun getExercise(exerciseId: String): Flow<ExerciseEntity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExercise(exercise: ExerciseEntity)
@@ -34,16 +31,23 @@ interface WorkoutDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExercises(exercises: List<ExerciseEntity>)
 
-    // Sessions
+    @Delete
+    suspend fun deleteExercise(exercise: ExerciseEntity)
+
+    // --- Workout Sessions ---
     @Query("SELECT * FROM workout_sessions WHERE exerciseId = :exerciseId ORDER BY timestamp DESC")
     fun getSessionsForExercise(exerciseId: String): Flow<List<WorkoutSessionEntity>>
 
-    @Query("SELECT * FROM workout_sessions WHERE exerciseId = :exerciseId ORDER BY timestamp DESC LIMIT :limit")
-    fun getRecentSessionsForExercise(exerciseId: String, limit: Int): Flow<List<WorkoutSessionEntity>>
+    @Query("SELECT * FROM workout_sessions WHERE exerciseId IN (SELECT id FROM exercises WHERE workoutId = :workoutId) ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLastSessionForWorkout(workoutId: String): WorkoutSessionEntity?
 
-    @Insert
-    suspend fun insertSession(session: WorkoutSessionEntity)
+    // ✅ WICHTIG: Rückgabetyp Long, damit wir die ID für Updates bekommen!
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSession(session: WorkoutSessionEntity): Long
 
-    @Query("DELETE FROM workout_sessions WHERE exerciseId = :exerciseId")
-    suspend fun deleteSessionsForExercise(exerciseId: String)
+    @Delete
+    suspend fun deleteSession(session: WorkoutSessionEntity)
+
+    @Query("DELETE FROM workout_sessions WHERE exerciseId IN (SELECT id FROM exercises WHERE workoutId = :workoutId)")
+    suspend fun deleteSessionsForWorkout(workoutId: String)
 }

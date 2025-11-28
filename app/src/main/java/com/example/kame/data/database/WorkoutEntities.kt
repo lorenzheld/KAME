@@ -41,13 +41,13 @@ data class ExerciseEntity(
             entity = ExerciseEntity::class,
             parentColumns = ["id"],
             childColumns = ["exerciseId"],
-            onDelete = ForeignKey.CASCADE
+            onDelete = ForeignKey.NO_ACTION  // ✅ CHANGED: Kein CASCADE!
         )
     ],
     indices = [Index("exerciseId")]
 )
 data class WorkoutSessionEntity(
-    @PrimaryKey(autoGenerate = true) val sessionId: Long = 0,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val exerciseId: String,
     val timestamp: String,
     val sets: List<CompletedSet>,

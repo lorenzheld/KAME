@@ -18,7 +18,10 @@ import com.example.kame.R
 import com.example.kame.ui.theme.KAMETheme
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    onNavigateToWorkouts: () -> Unit = {} // FIX: Parameter für Navigation hinzugefügt
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -75,9 +78,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Training starten Button
+        // Training starten Button (führt zu Workouts)
         Button(
-            onClick = { /* TODO: Training starten */ },
+            onClick = onNavigateToWorkouts, // FIX: Navigation aufgerufen
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp),
@@ -107,7 +110,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         MenuCard(
             icon = { CalendarIcon() },
             title = "Workout-Pläne",
-            onClick = { /* TODO */ }
+            onClick = onNavigateToWorkouts // FIX: Navigation aufgerufen
         )
 
         // Statistik Item
