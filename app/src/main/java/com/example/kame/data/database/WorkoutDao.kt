@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface WorkoutDao {
-    // Workouts
+    // --- Workouts ---
     @Query("SELECT * FROM workouts ORDER BY createdAt DESC")
     fun getAllWorkouts(): Flow<List<WorkoutEntity>>
 
@@ -16,12 +16,12 @@ interface WorkoutDao {
     suspend fun insertWorkout(workout: WorkoutEntity)
 
     @Update
-    suspend fun updateWorkout(workout: WorkoutEntity)  // ✅ NEU
+    suspend fun updateWorkout(workout: WorkoutEntity)
 
     @Delete
     suspend fun deleteWorkout(workout: WorkoutEntity)
 
-    // Exercises
+    // --- Exercises ---
     @Query("SELECT * FROM exercises WHERE workoutId = :workoutId ORDER BY `order` ASC")
     fun getExercisesForWorkout(workoutId: String): Flow<List<ExerciseEntity>>
 
@@ -34,15 +34,16 @@ interface WorkoutDao {
     @Delete
     suspend fun deleteExercise(exercise: ExerciseEntity)
 
-    // Workout Sessions
+    // --- Workout Sessions ---
     @Query("SELECT * FROM workout_sessions WHERE exerciseId = :exerciseId ORDER BY timestamp DESC")
     fun getSessionsForExercise(exerciseId: String): Flow<List<WorkoutSessionEntity>>
 
     @Query("SELECT * FROM workout_sessions WHERE exerciseId IN (SELECT id FROM exercises WHERE workoutId = :workoutId) ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLastSessionForWorkout(workoutId: String): WorkoutSessionEntity?
 
+    // ✅ WICHTIG: Rückgabetyp Long, damit wir die ID für Updates bekommen!
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSession(session: WorkoutSessionEntity)
+    suspend fun insertSession(session: WorkoutSessionEntity): Long
 
     @Delete
     suspend fun deleteSession(session: WorkoutSessionEntity)

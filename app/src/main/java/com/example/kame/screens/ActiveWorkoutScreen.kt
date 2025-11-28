@@ -1,6 +1,7 @@
 package com.example.kame.screens
 
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import com.example.kame.R
 import com.example.kame.data.*
 import com.example.kame.data.database.*
 import kotlinx.coroutines.flow.first
@@ -36,7 +37,6 @@ import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-// State für einen einzelnen Satz
 @Stable
 class SetState(
     val setNumber: Int,
@@ -51,7 +51,6 @@ class SetState(
     var isCompleted by mutableStateOf(isCompleted)
 }
 
-// State für eine Übung
 @Stable
 class ExerciseState(
     val exercise: ExerciseEntity,
@@ -89,19 +88,23 @@ fun ActiveWorkoutScreen(
     var isLoading by remember { mutableStateOf(true) }
     var hasSavedManually by remember { mutableStateOf(false) }
 
-    // Daten laden
+    var sessionTimestamp by remember { mutableStateOf<String?>(null) }
+    val sessionIds = remember { mutableStateMapOf<String, Long>() }
+
+    BackHandler {
+        showCancelDialog = true
+    }
+
+    // ---------------------------------------------------------
+    // WICHTIGER FIX IM LADE-LOGIK BLOCK
+    // ---------------------------------------------------------
     LaunchedEffect(workoutId, resumeSession) {
         try {
-            Log.d("ActiveWorkout", "Loading workout: $workoutId, resume: $resumeSession")
-
             workout = dao.getWorkout(workoutId).first()
-            Log.d("ActiveWorkout", "Workout: ${workout?.name}")
-
             val exercises = dao.getExercisesForWorkout(workoutId).first()
-            Log.d("ActiveWorkout", "Exercises: ${exercises.size}")
 
-            // IMMER frisch starten (Resume temporär deaktiviert)
-            exerciseStates = exercises.mapIndexed { index, exercise ->
+            // 1. Leere States erstellen
+            val initialStates = exercises.mapIndexed { index, exercise ->
                 ExerciseState(
                     exercise = exercise,
                     sets = exercise.sets.map { plannedSet ->
@@ -118,39 +121,86 @@ fun ActiveWorkoutScreen(
                 )
             }
 
-            Log.d("ActiveWorkout", "States created: ${exerciseStates.size}")
+            // 2. Bestimme den KORREKTEN Zeitstempel
+            var masterTimestamp: String? = null
+
+            // Wir suchen zuerst über ALLE Übungen hinweg nach dem allerneusten Eintrag
+            if (resumeSession) {
+                var latestSessionFound: WorkoutSessionEntity? = null
+
+                for (ex in exercises) {
+                    val sessions = dao.getSessionsForExercise(ex.id).first()
+                    val first = sessions.firstOrNull()
+                    if (first != null) {
+                        // Wir suchen den aktuellsten Eintrag über alle Übungen hinweg
+                        if (latestSessionFound == null || first.timestamp > latestSessionFound!!.timestamp) {
+                            latestSessionFound = first
+                        }
+                    }
+                }
+
+                // Prüfen: Haben wir was gefunden UND ist es NICHT beendet?
+                if (latestSessionFound != null && latestSessionFound.notes != "FINISHED") {
+                    masterTimestamp = latestSessionFound.timestamp
+                    Log.d("ActiveWorkout", "Resuming VALID session: $masterTimestamp")
+                } else {
+                    Log.d("ActiveWorkout", "Latest session was FINISHED or null. Starting NEW.")
+                }
+            }
+
+            // Wenn wir keinen gültigen alten Zeitstempel haben, erstellen wir einen neuen
+            if (masterTimestamp == null) {
+                masterTimestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME)
+            }
+
+            // Speichern für später
+            sessionTimestamp = masterTimestamp
+
+            // 3. Daten in die UI laden - ABER NUR wenn der Zeitstempel passt!
+            val loadedStates = initialStates.map { state ->
+                val sessions = dao.getSessionsForExercise(state.exercise.id).first()
+                val lastSession = sessions.firstOrNull()
+
+                // CHECK: Stimmt der Zeitstempel mit unserem Master-Zeitstempel überein?
+                if (lastSession != null && lastSession.timestamp == masterTimestamp) {
+
+                    // Ja, das gehört zu DIESEM Workout
+                    sessionIds[state.exercise.id] = lastSession.id
+
+                    state.sets.forEach { setUiState ->
+                        val savedSet = lastSession.sets.find { it.setNumber == setUiState.setNumber }
+                        if (savedSet != null && savedSet.completed) {
+                            setUiState.actualReps = savedSet.reps.toString()
+                            setUiState.actualWeight = savedSet.weight.toString()
+                            setUiState.isCompleted = true
+                        }
+                    }
+                } else {
+                    // Nein, das ist entweder null oder ein ALTOS Workout (Zeitstempel passt nicht).
+                    // Wir laden NICHTS, lassen die Felder leer und ID auf 0 (für neuen Insert).
+                    // Das verhindert, dass alte Daten ("2/3 fertig") hier auftauchen.
+                }
+                state
+            }
+
+            exerciseStates = loadedStates
             isLoading = false
-            Log.d("ActiveWorkout", "DONE")
         } catch (e: Exception) {
-            Log.e("ActiveWorkout", "ERROR", e)
+            Log.e("ActiveWorkout", "ERROR loading data", e)
             isLoading = false
         }
     }
 
-    // Auto-Save beim Verlassen
+    // Auto-Save
     DisposableEffect(Unit) {
         onDispose {
-            // NUR auto-save wenn NICHT manuell gespeichert wurde
-            if (!hasSavedManually) {
-                val hasCompletedSets = exerciseStates.any { exerciseState ->
-                    exerciseState.sets.any { it.isCompleted }
-                }
-
+            if (!hasSavedManually && sessionTimestamp != null) {
+                val hasCompletedSets = exerciseStates.any { it.completedCount > 0 }
                 if (hasCompletedSets) {
                     scope.launch {
-                        try {
-                            Log.d("ActiveWorkout", "Auto-saving on dispose...")
-                            saveWorkoutSession(dao, exerciseStates, workoutId)
-                            Log.d("ActiveWorkout", "Auto-save successful")
-                        } catch (e: Exception) {
-                            Log.e("ActiveWorkout", "Error auto-saving", e)
-                        }
+                        saveWorkoutSession(dao, exerciseStates, workoutId, sessionTimestamp!!, sessionIds, isFinished = false)
                     }
-                } else {
-                    Log.d("ActiveWorkout", "No completed sets, skipping auto-save")
                 }
-            } else {
-                Log.d("ActiveWorkout", "Already saved manually, skipping auto-save")
             }
         }
     }
@@ -161,14 +211,16 @@ fun ActiveWorkoutScreen(
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = workout?.name ?: "Loading...",
+                            text = workout?.name ?: "Laden...",
                             style = MaterialTheme.typography.titleLarge
                         )
-                        Text(
-                            text = "${currentExerciseIndex + 1} / ${exerciseStates.size}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (!isLoading && exerciseStates.isNotEmpty()) {
+                            Text(
+                                text = "${currentExerciseIndex + 1} / ${exerciseStates.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -186,9 +238,7 @@ fun ActiveWorkoutScreen(
     ) { padding ->
         if (isLoading || exerciseStates.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
@@ -207,11 +257,8 @@ fun ActiveWorkoutScreen(
                         exerciseState = exerciseState,
                         isActive = index == currentExerciseIndex,
                         onToggleExpand = {
-                            // Alle anderen Fenster schließen
                             exerciseStates.forEachIndexed { i, state ->
-                                if (i != index) {
-                                    state.isExpanded = false
-                                }
+                                if (i != index) state.isExpanded = false
                             }
                             exerciseState.isExpanded = !exerciseState.isExpanded
                         },
@@ -219,11 +266,9 @@ fun ActiveWorkoutScreen(
                             val set = exerciseState.sets[setIndex]
                             set.isCompleted = !set.isCompleted
 
-                            // Auto-advance wenn alle Sätze fertig
                             if (exerciseState.isFullyCompleted &&
                                 index == currentExerciseIndex &&
                                 currentExerciseIndex < exerciseStates.size - 1) {
-
                                 exerciseState.isExpanded = false
                                 currentExerciseIndex++
                                 exerciseStates[currentExerciseIndex].isExpanded = true
@@ -232,13 +277,10 @@ fun ActiveWorkoutScreen(
                     )
                 }
 
-                // Finish Button
                 item {
                     Button(
                         onClick = { showFinishDialog = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
@@ -252,82 +294,52 @@ fun ActiveWorkoutScreen(
             }
         }
 
-        // Cancel Dialog
-        if (showCancelDialog) {
-            val completedSets = remember(exerciseStates) {
-                exerciseStates.sumOf { it.completedCount }
-            }
-            val totalSets = remember(exerciseStates) {
-                exerciseStates.sumOf { it.sets.size }
-            }
-
-            AlertDialog(
-                onDismissRequest = { showCancelDialog = false },
-                title = { Text("Workout abbrechen?") },
-                text = {
-                    if (completedSets > 0) {
-                        Text("Du hast $completedSets von $totalSets Sätzen abgeschlossen.\n\nDein Fortschritt wird automatisch gespeichert.")
-                    } else {
-                        Text("Du hast noch keine Sätze abgeschlossen.\n\nMöchtest du wirklich abbrechen?")
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showCancelDialog = false
-                            if (completedSets > 0) {
-                                hasSavedManually = true
-                                scope.launch {
-                                    saveWorkoutSession(dao, exerciseStates, workoutId)
-                                }
-                            }
-                            onFinish()
-                        }
-                    ) {
-                        Text(if (completedSets > 0) "Speichern & Beenden" else "Ja, abbrechen")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showCancelDialog = false }) {
-                        Text("Zurück zum Training")
-                    }
-                }
-            )
-        }
-
-        // Finish Dialog
         if (showFinishDialog) {
-            val completedSets = remember(exerciseStates) {
-                exerciseStates.sumOf { it.completedCount }
-            }
-            val totalSets = remember(exerciseStates) {
-                exerciseStates.sumOf { it.sets.size }
-            }
-
             AlertDialog(
                 onDismissRequest = { showFinishDialog = false },
                 title = { Text("Workout beenden?") },
-                text = {
-                    Text("Du hast $completedSets von $totalSets Sätzen abgeschlossen.")
-                },
+                text = { Text("Möchtest du das Workout speichern und beenden?") },
                 confirmButton = {
                     TextButton(
                         onClick = {
                             showFinishDialog = false
                             hasSavedManually = true
                             scope.launch {
-                                saveWorkoutSession(dao, exerciseStates, workoutId)
+                                if (sessionTimestamp != null) {
+                                    saveWorkoutSession(dao, exerciseStates, workoutId, sessionTimestamp!!, sessionIds, isFinished = true)
+                                }
+                                onFinish()
                             }
-                            onFinish()
                         }
-                    ) {
-                        Text("Speichern & Beenden")
-                    }
+                    ) { Text("Speichern & Beenden") }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showFinishDialog = false }) {
-                        Text("Abbrechen")
-                    }
+                    TextButton(onClick = { showFinishDialog = false }) { Text("Abbrechen") }
+                }
+            )
+        }
+
+        if (showCancelDialog) {
+            AlertDialog(
+                onDismissRequest = { showCancelDialog = false },
+                title = { Text("Training abbrechen?") },
+                text = { Text("Dein bisheriger Fortschritt wird gespeichert.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showCancelDialog = false
+                            hasSavedManually = true
+                            scope.launch {
+                                if (sessionTimestamp != null) {
+                                    saveWorkoutSession(dao, exerciseStates, workoutId, sessionTimestamp!!, sessionIds, isFinished = false)
+                                }
+                                onFinish()
+                            }
+                        }
+                    ) { Text("Speichern & Beenden") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCancelDialog = false }) { Text("Zurück") }
                 }
             )
         }
@@ -352,7 +364,6 @@ fun ExerciseCard(
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -371,7 +382,6 @@ fun ExerciseCard(
                     )
                 }
 
-                // Completion Badge
                 val completedSets = exerciseState.completedCount
                 val totalSets = exerciseState.sets.size
 
@@ -405,52 +415,25 @@ fun ExerciseCard(
                 }
             }
 
-            // Sets
             AnimatedVisibility(visible = exerciseState.isExpanded) {
                 Column(
                     modifier = Modifier.padding(top = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Header Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            "Set",
-                            modifier = Modifier.width(40.dp),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "Ziel",
-                            modifier = Modifier.width(70.dp),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "Gewicht (kg)",
-                            modifier = Modifier.width(100.dp),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            "Wdh.",
-                            modifier = Modifier.width(80.dp),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
+                        Text("Set", Modifier.width(40.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Ziel", Modifier.width(70.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Gewicht (kg)", Modifier.width(100.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Text("Wdh.", Modifier.width(80.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.width(48.dp))
                     }
 
                     exerciseState.sets.forEachIndexed { index, setState ->
-                        SetRow(
-                            setState = setState,
-                            onComplete = { onSetComplete(index) }
-                        )
+                        SetRow(setState = setState, onComplete = { onSetComplete(index) })
                     }
                 }
             }
@@ -470,165 +453,59 @@ fun SetRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Set Number
-        Text(
-            text = "${setState.setNumber}",
-            modifier = Modifier.width(40.dp),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Text("${setState.setNumber}", Modifier.width(40.dp), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("${setState.targetReps}×${setState.targetWeight.toInt()}kg", Modifier.width(70.dp), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        // Target
-        Text(
-            text = "${setState.targetReps}×${setState.targetWeight.toInt()}kg",
-            modifier = Modifier.width(70.dp),
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // Weight Input
         var weightFocused by remember { mutableStateOf(false) }
-
         OutlinedTextField(
             value = setState.actualWeight,
-            onValueChange = { newValue ->
-                if (newValue.isEmpty() || newValue.matches(Regex("^\\d*\\.?\\d*$"))) {
-                    setState.actualWeight = newValue
-                }
-            },
-            modifier = Modifier
-                .width(100.dp)
-                .height(56.dp)
-                .onFocusChanged { focusState ->
-                    if (focusState.isFocused && !weightFocused) {
-                        weightFocused = true
-                    } else if (!focusState.isFocused) {
-                        weightFocused = false
-                    }
-                },
-            textStyle = LocalTextStyle.current.copy(
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Bold
-            ),
+            onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d*\\.?\\d*$"))) setState.actualWeight = it },
+            modifier = Modifier.width(100.dp).height(56.dp).onFocusChanged { weightFocused = it.isFocused },
+            textStyle = LocalTextStyle.current.copy(fontSize = 16.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold),
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Decimal,
-                imeAction = ImeAction.Next
-            ),
-            keyboardActions = KeyboardActions(
-                onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Next) }
-            ),
-            enabled = !setState.isCompleted,
-            colors = OutlinedTextFieldDefaults.colors(
-                disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-            )
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+            keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Next) }),
+            enabled = !setState.isCompleted
         )
 
-        // Reps Input
         var repsFocused by remember { mutableStateOf(false) }
-
         OutlinedTextField(
             value = setState.actualReps,
-            onValueChange = { newValue ->
-                if (newValue.isEmpty() || newValue.matches(Regex("^\\d+$"))) {
-                    setState.actualReps = newValue
-                }
-            },
-            modifier = Modifier
-                .width(80.dp)
-                .height(56.dp)
-                .onFocusChanged { focusState ->
-                    if (focusState.isFocused && !repsFocused) {
-                        repsFocused = true
-                    } else if (!focusState.isFocused) {
-                        repsFocused = false
-                    }
-                },
-            textStyle = LocalTextStyle.current.copy(
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Bold
-            ),
+            onValueChange = { if (it.isEmpty() || it.matches(Regex("^\\d+$"))) setState.actualReps = it },
+            modifier = Modifier.width(80.dp).height(56.dp).onFocusChanged { repsFocused = it.isFocused },
+            textStyle = LocalTextStyle.current.copy(fontSize = 16.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold),
             singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-                imeAction = ImeAction.Done
-            ),
-            keyboardActions = KeyboardActions(
-                onDone = { focusManager.clearFocus() }
-            ),
-            enabled = !setState.isCompleted,
-            colors = OutlinedTextFieldDefaults.colors(
-                disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-            )
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+            enabled = !setState.isCompleted
         )
 
-        // Check Button
         IconButton(
             onClick = onComplete,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(
-                    if (setState.isCompleted)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.surface
-                )
+            modifier = Modifier.size(48.dp).clip(CircleShape).background(if (setState.isCompleted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
         ) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Complete",
-                tint = if (setState.isCompleted)
-                    MaterialTheme.colorScheme.onPrimary
-                else
-                    MaterialTheme.colorScheme.onSurface
-            )
+            Icon(Icons.Default.Check, "Complete", tint = if (setState.isCompleted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
         }
     }
 }
 
-// Session in DB speichern
 suspend fun saveWorkoutSession(
     dao: WorkoutDao,
     exerciseStates: List<ExerciseState>,
-    workoutId: String
+    workoutId: String,
+    timestamp: String,
+    sessionIds: androidx.compose.runtime.snapshots.SnapshotStateMap<String, Long>,
+    isFinished: Boolean
 ) {
     try {
-        val now = LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME)
-        Log.d("ActiveWorkout", "=== START SAVING SESSION ===")
-        Log.d("ActiveWorkout", "WorkoutId: $workoutId")
-        Log.d("ActiveWorkout", "Timestamp: $now")
-
-        var totalSavedSets = 0
+        Log.d("ActiveWorkout", "=== SAVING SESSION (Finished: $isFinished) ===")
+        val existingExercises = try { dao.getExercisesForWorkout(workoutId).first().map { it.id }.toSet() } catch(e: Exception) { emptySet() }
 
         exerciseStates.forEach { exerciseState ->
-            Log.d("ActiveWorkout", "Processing exercise: ${exerciseState.exercise.name}")
-            Log.d("ActiveWorkout", "Exercise ID: ${exerciseState.exercise.id}")
-
-            // Prüfe ob Exercise in DB existiert
-            val exerciseExists = try {
-                val exercises = dao.getExercisesForWorkout(workoutId).first()
-                val exists = exercises.any { it.id == exerciseState.exercise.id }
-                Log.d("ActiveWorkout", "Exercise exists in DB: $exists")
-                exists
-            } catch (e: Exception) {
-                Log.e("ActiveWorkout", "Error checking exercise existence", e)
-                false
-            }
-
-            if (!exerciseExists) {
-                Log.e("ActiveWorkout", "ERROR: Exercise ${exerciseState.exercise.id} does NOT exist in DB!")
-                return@forEach // Skip this exercise
-            }
+            if (!existingExercises.contains(exerciseState.exercise.id)) return@forEach
 
             val completedSets = exerciseState.sets.mapNotNull { setState ->
-                if (setState.isCompleted &&
-                    setState.actualReps.isNotBlank() &&
-                    setState.actualWeight.isNotBlank()) {
+                if (setState.isCompleted && setState.actualReps.isNotBlank() && setState.actualWeight.isNotBlank()) {
                     CompletedSet(
                         setNumber = setState.setNumber,
                         reps = setState.actualReps.toIntOrNull() ?: setState.targetReps,
@@ -639,45 +516,26 @@ suspend fun saveWorkoutSession(
             }
 
             if (completedSets.isNotEmpty()) {
-                Log.d("ActiveWorkout", "Saving ${completedSets.size} sets for exercise: ${exerciseState.exercise.name}")
+                val existingId = sessionIds[exerciseState.exercise.id] ?: 0L
 
                 val session = WorkoutSessionEntity(
+                    id = existingId,
                     exerciseId = exerciseState.exercise.id,
-                    timestamp = now,
+                    timestamp = timestamp,
                     sets = completedSets,
-                    notes = null
+                    notes = if (isFinished) "FINISHED" else null
                 )
 
-                Log.d("ActiveWorkout", "Session entity: $session")
-
-                try {
-                    dao.insertSession(session)
-                    Log.d("ActiveWorkout", "✅ Session inserted successfully!")
-                    totalSavedSets += completedSets.size
-                } catch (e: Exception) {
-                    Log.e("ActiveWorkout", "❌ ERROR inserting session", e)
-                    throw e
-                }
-            } else {
-                Log.d("ActiveWorkout", "No completed sets for this exercise, skipping")
+                val newId = dao.insertSession(session)
+                sessionIds[exerciseState.exercise.id] = newId
             }
         }
 
-        Log.d("ActiveWorkout", "Total saved sets: $totalSavedSets")
+        val workout = dao.getWorkout(workoutId).first()
+        workout?.let { dao.updateWorkout(it.copy(lastPerformed = timestamp)) }
 
-        // Update lastPerformed nur wenn mindestens ein Satz gespeichert wurde
-        if (totalSavedSets > 0) {
-            val workout = dao.getWorkout(workoutId).first()
-            Log.d("ActiveWorkout", "Workout from DB: $workout")
-            workout?.let {
-                dao.updateWorkout(it.copy(lastPerformed = now))  // ✅ CHANGED: updateWorkout statt insertWorkout!
-                Log.d("ActiveWorkout", "✅ Updated lastPerformed for workout")
-            }
-        }
-
-        Log.d("ActiveWorkout", "=== END SAVING SESSION ===")
+        Log.d("ActiveWorkout", "=== SAVED SUCCESSFULLY ===")
     } catch (e: Exception) {
-        Log.e("ActiveWorkout", "=== ERROR in saveWorkoutSession ===", e)
-        throw e
+        Log.e("ActiveWorkout", "ERROR saving", e)
     }
 }

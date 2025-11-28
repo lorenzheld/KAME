@@ -39,11 +39,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // ✅ Datenbank initialisieren
         val database = WorkoutDatabase.getDatabase(this)
         val workoutDao = database.workoutDao()
 
-        // ✅ Sample-Daten einfügen (nur beim ersten Start)
         SampleData.insertSampleDataIfNeeded(this, workoutDao, lifecycleScope)
 
         setContent {
@@ -85,7 +83,10 @@ fun KAMEApp() {
     ) {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
             when (currentDestination) {
-                AppDestinations.HOME -> HomeScreen(modifier = Modifier.padding(innerPadding))
+                AppDestinations.HOME -> HomeScreen(
+                    modifier = Modifier.padding(innerPadding),
+                    onNavigateToWorkouts = { currentDestination = AppDestinations.WORKOUTS } // FIX: Navigation übergeben
+                )
                 AppDestinations.WORKOUTS -> WorkoutsScreen(modifier = Modifier.padding(innerPadding))
                 AppDestinations.DIAGRAMME -> DiagrammeScreen(modifier = Modifier.padding(innerPadding))
                 AppDestinations.PROFIL -> ProfilScreen(modifier = Modifier.padding(innerPadding))

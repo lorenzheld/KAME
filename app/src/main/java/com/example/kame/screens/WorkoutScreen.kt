@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,16 +40,12 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val database = remember { WorkoutDatabase.getDatabase(context) }
     val workoutDao = database.workoutDao()
-    val scope = rememberCoroutineScope()
 
-    // Daten aus der Datenbank abrufen (live updates!)
     val workouts by workoutDao.getAllWorkouts().collectAsState(initial = emptyList())
 
-    // Navigation State
-    var activeWorkoutId by remember { mutableStateOf<String?>(null) }
-    var resumeWorkout by remember { mutableStateOf(false) }
+    var activeWorkoutId by rememberSaveable { mutableStateOf<String?>(null) }
+    var resumeWorkout by rememberSaveable { mutableStateOf(false) }
 
-    // Zeige ActiveWorkoutScreen wenn gestartet
     if (activeWorkoutId != null) {
         ActiveWorkoutScreen(
             workoutId = activeWorkoutId!!,
@@ -120,18 +117,19 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            // Workout Plan Cards aus der Datenbank
             items(workouts) { workout ->
-                // Prüfe ob es eine aktuelle Session gibt (innerhalb der letzten 6 Stunden)
                 var hasRecentSession by remember { mutableStateOf(false) }
 
                 LaunchedEffect(workout.id) {
                     val lastSession = workoutDao.getLastSessionForWorkout(workout.id)
-                    if (lastSession != null) {
+                    // ✅ LOGIK GEÄNDERT: Zeige "Resume" nur, wenn Notes NICHT "FINISHED" sind
+                    if (lastSession != null && lastSession.notes != "FINISHED") {
                         val sessionTime = LocalDateTime.parse(lastSession.timestamp, DateTimeFormatter.ISO_DATE_TIME)
                         val now = LocalDateTime.now()
                         val hoursSince = ChronoUnit.HOURS.between(sessionTime, now)
-                        hasRecentSession = hoursSince < 6  // Innerhalb der letzten 6 Stunden
+                        hasRecentSession = hoursSince < 6
+                    } else {
+                        hasRecentSession = false
                     }
                 }
 
@@ -149,7 +147,6 @@ fun WorkoutsScreen(modifier: Modifier = Modifier) {
                 )
             }
 
-            // Empty State nur anzeigen, wenn keine Workouts vorhanden
             if (workouts.isEmpty()) {
                 item {
                     EmptyStateCard()
@@ -177,7 +174,6 @@ fun WorkoutPlanCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header mit Titel und Menü
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -198,12 +194,10 @@ fun WorkoutPlanCard(
                 }
             }
 
-            // Tags
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Muscle Groups Tag
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
@@ -216,7 +210,6 @@ fun WorkoutPlanCard(
                     )
                 }
 
-                // Exercise Count Tag
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = MaterialTheme.colorScheme.primaryContainer
@@ -230,7 +223,6 @@ fun WorkoutPlanCard(
                 }
             }
 
-            // Last Performed Info (optional)
             workout.lastPerformed?.let { lastDate ->
                 Text(
                     text = "Zuletzt: ${formatDate(lastDate)}",
@@ -239,12 +231,10 @@ fun WorkoutPlanCard(
                 )
             }
 
-            // Action Buttons - ZWEI BUTTONS wenn aktive Session
             if (hasRecentSession) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Resume Button (prominent)
                     Button(
                         onClick = { onResumeWorkout(workout.id) },
                         modifier = Modifier
@@ -268,7 +258,6 @@ fun WorkoutPlanCard(
                         )
                     }
 
-                    // Start New + Share
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -307,7 +296,6 @@ fun WorkoutPlanCard(
                     }
                 }
             } else {
-                // Original Single Button Layout
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -374,7 +362,6 @@ fun EmptyStateCard() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Icon (Checkmarks)
             Icon(
                 painter = painterResource(id = android.R.drawable.checkbox_on_background),
                 contentDescription = null,
@@ -416,10 +403,8 @@ fun EmptyStateCard() {
     }
 }
 
-// Helper function für Datum-Formatierung
 fun formatDate(isoDate: String): String {
     return try {
-        // Vereinfachte Darstellung: Zeige nur Datum
         val parts = isoDate.split("T")[0].split("-")
         "${parts[2]}.${parts[1]}.${parts[0]}"
     } catch (e: Exception) {

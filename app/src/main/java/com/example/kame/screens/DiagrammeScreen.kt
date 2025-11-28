@@ -333,7 +333,11 @@ fun LineChart(
 
             val maxWeight = data.maxOf { it.weight }
             val minWeight = data.minOf { it.weight }
-            val range = maxWeight - minWeight
+
+            // FIX: Division durch Null verhindern, wenn min und max gleich sind
+            val diff = maxWeight - minWeight
+            val range = if (diff == 0f) 1f else diff
+
             val padding = 40f
 
             val chartWidth = size.width - padding * 2
@@ -344,7 +348,8 @@ fun LineChart(
             val path = Path()
             data.forEachIndexed { index, point ->
                 val x = padding + index * stepX
-                val normalizedY = if (range > 0) (point.weight - minWeight) / range else 0.5f
+                // Zentriere Linie vertikal, wenn range 0 war (diff == 0)
+                val normalizedY = if (diff > 0) (point.weight - minWeight) / range else 0.5f
                 val y = size.height - padding - (normalizedY * chartHeight)
 
                 if (index == 0) {
@@ -363,7 +368,7 @@ fun LineChart(
             // Draw points
             data.forEachIndexed { index, point ->
                 val x = padding + index * stepX
-                val normalizedY = if (range > 0) (point.weight - minWeight) / range else 0.5f
+                val normalizedY = if (diff > 0) (point.weight - minWeight) / range else 0.5f
                 val y = size.height - padding - (normalizedY * chartHeight)
 
                 drawCircle(
